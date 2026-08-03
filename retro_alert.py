@@ -20,8 +20,15 @@ def get_user_id():
     }
 
     r = requests.get(url, headers=headers)
-    return r.json()["data"]["id"]
 
+    print("X response:", r.text)
+
+    data = r.json()
+
+    if "data" not in data:
+        raise Exception("X API error: " + r.text)
+
+    return data["data"]["id"]
 def check_tweets():
     user_id = get_user_id()
 
