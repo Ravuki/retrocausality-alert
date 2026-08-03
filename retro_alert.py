@@ -1,15 +1,52 @@
 import requests
 import os
-from datetime import datetime
 
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 
-def send_alert(text):
+USERNAME = "HYPERMYSTx"
+KEYWORD = "retrocausality"
+
+def send_discord(message):
     requests.post(
-        WEBHOOK_URL,
-        json={"content": text}
+        DISCORD_WEBHOOK,
+        json={"content": message}
     )
 
-print("Bot działa:", datetime.now())
+def get_user_id():
+    url = f"https://api.x.com/2/users/by/username/{USERNAME}"
+    headers = {
+        "Authorization": f"Bearer {X_BEARER_TOKEN}"
+    }
 
-send_alert("✅ GitHubowy bot Retrocausality działa!")
+    r = requests.get(url, headers=headers)
+    return r.json()["data"]["id"]
+
+def check_tweets():
+    user_id = get_user_id()
+
+    url = f"https://api.x.com/2/users/{user_id}/tweets"
+
+    headers = {
+        "Authorization": f"Bearer {X_BEARER_TOKEN}"
+    }
+
+    params = {
+        "max_results": 5,
+        "tweet.fields": "created_at"
+    }
+
+    r = requests.get(url, headers=headers, params=params)
+
+    tweets = r.json().get("data", [])
+
+    for tweet in tweets:
+        text = tweet["text"].lower()
+
+        if KEYWORD in text:
+            send_discord(
+                "🚨 RETROCAUSALITY ALERT 🚨\n\n" + tweet["text"]
+            )
+            break
+
+check_tweets()
