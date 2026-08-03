@@ -13,7 +13,7 @@ jobs:
       - name: Pobierz kod
         uses: actions/checkout@v4
 
-      - name: Uruchom Pythona
+      - name: Ustaw Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -21,7 +21,7 @@ jobs:
       - name: Instalacja bibliotek
         run: pip install requests
 
-- name: Start bota
-  env:
-    DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-  run: python retro_alert.py
+      - name: Start bota
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python retro_alert.py
