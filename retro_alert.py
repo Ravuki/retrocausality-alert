@@ -1,10 +1,10 @@
 import requests
 import os
+import xml.etree.ElementTree as ET
 
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
+RSS_FEED_URL = os.getenv("RSS_FEED_URL")
 
-USERNAME = "HYPERMYSTx"
 KEYWORD = "retrocausality"
 
 def send_discord(message):
@@ -13,47 +13,31 @@ def send_discord(message):
         json={"content": message}
     )
 
-def get_user_id():
-    url = f"https://api.x.com/2/users/by/username/{USERNAME}"
-    headers = {
-        "Authorization": f"Bearer {X_BEARER_TOKEN}"
-    }
+def check_feed():
+    r = requests.get(RSS_FEED_URL)
 
-    r = requests.get(url, headers=headers)
+    root = ET.fromstring(r.text)
 
-    print("X response:", r.text)
+    for item in root.findall(".//item"):
+        title = item.find("title")
+        description = item.find("description")
+        link = item.find("link")
 
-    data = r.json()
+        text = ""
 
-    if "data" not in data:
-        raise Exception("X API error: " + r.text)
+        if title is not None:
+            text += title.text or ""
 
-    return data["data"]["id"]
-def check_tweets():
-    user_id = get_user_id()
+        if description is not None:
+            text += " " + (description.text or "")
 
-    url = f"https://api.x.com/2/users/{user_id}/tweets"
-
-    headers = {
-        "Authorization": f"Bearer {X_BEARER_TOKEN}"
-    }
-
-    params = {
-        "max_results": 5,
-        "tweet.fields": "created_at"
-    }
-
-    r = requests.get(url, headers=headers, params=params)
-
-    tweets = r.json().get("data", [])
-
-    for tweet in tweets:
-        text = tweet["text"].lower()
-
-        if KEYWORD in text:
+        if KEYWORD in text.lower():
             send_discord(
-                "🚨 RETROCAUSALITY ALERT 🚨\n\n" + tweet["text"]
+                "🚨 RETROCAUSALITY ALERT 🚨\n\n"
+                + text
+                + "\n\n"
+                + (link.text if link is not None else "")
             )
-            break
+            return
 
-check_tweets()
+check_feed()
