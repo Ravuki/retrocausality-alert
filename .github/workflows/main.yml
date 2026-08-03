@@ -21,5 +21,7 @@ jobs:
       - name: Instalacja bibliotek
         run: pip install requests
 
-      - name: Start bota
-        run: python retro_alert.py
+- name: Start bota
+  env:
+    DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+  run: python retro_alert.py
