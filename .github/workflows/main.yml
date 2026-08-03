@@ -24,4 +24,5 @@ jobs:
       - name: Start bota
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python retro_alert.py
