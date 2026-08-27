@@ -10,9 +10,15 @@ jobs:
     steps:
       - name: Pobierz x-cli
         run: |
-          curl -L https://github.com/tamnguyen/XCLI/releases/latest/download/x-cli-linux-amd64 -o x-cli
-          chmod +x x-cli
+          curl -L "https://github.com/tamnd/x-cli/releases/download/v0.5.0/x-0.5.0-x86_64-unknown-linux-gnu.tar.gz" -o x.tar.gz
+          tar -xzf x.tar.gz
+          find . -maxdepth 2 -type f -name "x" -print
+          chmod +x ./x
+
+      - name: Sprawdź wersję
+        run: |
+          ./x --version
 
       - name: Sprawdź HyperMyst
         run: |
-          ./x-cli user timeline HYPERMYSTx --limit 10
+          ./x timeline HYPERMYSTx --guest -n 10
