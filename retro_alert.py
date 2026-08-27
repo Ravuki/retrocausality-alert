@@ -30,11 +30,8 @@ def send_discord(message):
         )
 
         if response.status_code not in (200, 204):
-            print(
-                "Discord webhook error:",
-                response.status_code,
-                response.text,
-            )
+            print("Discord webhook error:", response.status_code)
+            print(response.text)
             return False
 
         print("Discord alert sent successfully.")
@@ -138,17 +135,17 @@ def check_feed():
         print("x-cli nie zwrócił żadnych tweetów.")
         return
 
-print("Pobrano tweetów:", len(tweets))
+    print("Pobrano tweetów:", len(tweets))
 
-latest = tweets[0]
+    # PODGLĄD NAJNOWSZEGO TWEETA
+    latest = tweets[0]
 
-print("NAJNOWSZY POBRANY TWEET:")
-print("ID:", latest.get("id"))
-print("Treść:", latest.get("text"))
-print("URL:", latest.get("url"))
+    print("NAJNOWSZY POBRANY TWEET:")
+    print("ID:", latest.get("id"))
+    print("Treść:", latest.get("text"))
+    print("URL:", latest.get("url"))
 
-new_tweets = []
-
+    new_tweets = []
 
     for tweet in tweets:
         tweet_id = str(tweet.get("id", "")).strip()
@@ -161,7 +158,7 @@ new_tweets = []
 
         new_tweets.append(tweet)
 
-    # Najpierw najstarsze, potem najnowsze.
+    # Przetwarzamy od najstarszego do najnowszego.
     new_tweets.reverse()
 
     print("Nowych tweetów:", len(new_tweets))
