@@ -1,0 +1,18 @@
+name: Test HyperMyst
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Pobierz x-cli
+        run: |
+          curl -L https://github.com/tamnguyen/XCLI/releases/latest/download/x-cli-linux-amd64 -o x-cli
+          chmod +x x-cli
+
+      - name: Sprawdź HyperMyst
+        run: |
+          ./x-cli user timeline HYPERMYSTx --limit 10
