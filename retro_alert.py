@@ -138,9 +138,17 @@ def check_feed():
         print("x-cli nie zwrócił żadnych tweetów.")
         return
 
-    print("Pobrano tweetów:", len(tweets))
+print("Pobrano tweetów:", len(tweets))
 
-    new_tweets = []
+latest = tweets[0]
+
+print("NAJNOWSZY POBRANY TWEET:")
+print("ID:", latest.get("id"))
+print("Treść:", latest.get("text"))
+print("URL:", latest.get("url"))
+
+new_tweets = []
+
 
     for tweet in tweets:
         tweet_id = str(tweet.get("id", "")).strip()
