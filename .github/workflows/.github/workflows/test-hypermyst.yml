@@ -1,0 +1,30 @@
+name: Test HyperMyst
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalacja Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Instalacja x-cli
+        run: |
+          go install github.com/tamnd/x-cli/cmd/x@v0.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Sprawdź wersję
+        run: |
+          x version
+
+      - name: Pobierz ostatnie posty HyperMyst
+        run: |
+          x timeline HYPERMYSTx --guest -n 10 -o jsonl
