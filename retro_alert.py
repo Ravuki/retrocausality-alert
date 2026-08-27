@@ -7,20 +7,22 @@ from datetime import datetime, timezone, timedelta
 USERNAME = "HYPERMYSTx"
 MEMORY_FILE = "last_tweet.txt"
 
-# Publiczny FxTwitter API v2
 API_URL = f"https://api.fxtwitter.com/2/profile/{USERNAME}/statuses"
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
 MAX_FEED_AGE_HOURS = 24
 
+
 KEYWORDS = {
     "retrocausality": [
         r"\bretrocausality\b",
     ],
+
     "voidwalker": [
         r"\bvoid\s*walker\b",
     ],
+
     "void shadow": [
         r"\bvoid\s*shadow\b",
         r"\bvoidshadow\b",
@@ -48,12 +50,18 @@ def parse_created_at(value):
     if not value:
         return None
 
-    try:
-        return datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        )
-    except ValueError:
-        return None
+    formats = [
+        "%a %b %d %H:%M:%S %z %Y",
+        "%Y-%m-%dT%H:%M:%S%z",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+
+    return None
 
 
 def fetch_tweets():
@@ -76,26 +84,30 @@ def fetch_tweets():
 
     print("Odpowiedź API otrzymana.")
 
-    if data.get("code") not in (None, 200):
+    if data.get("code") != 200:
         raise RuntimeError(
             f"FxTwitter API zwróciło code={data.get('code')}"
         )
 
-    # FxTwitter API v2 zwraca listy w polu "tweets"/"statuses"
-    tweets = data.get("tweets")
+    # WAŻNE:
+    # FxTwitter API v2 zwraca tweety w polu "results".
+    results = data.get("results")
 
-    if tweets is None:
-        tweets = data.get("statuses")
-
-    if not isinstance(tweets, list):
+    if not isinstance(results, list):
         raise RuntimeError(
-            "Nie znaleziono listy tweetów w odpowiedzi FxTwitter."
+            "FxTwitter API nie zwróciło listy 'results'."
         )
 
-    parsed = []
+    tweets = []
 
-    for tweet in tweets:
+    for tweet in results:
+        if tweet.get("type") != "status":
+            continue
+
         tweet_id = tweet.get("id")
+        text = tweet.get("text") or ""
+        created_at = tweet.get("created_at")
+        url = tweet.get("url")
 
         if not tweet_id:
             continue
@@ -105,33 +117,28 @@ def fetch_tweets():
         except (ValueError, TypeError):
             continue
 
-        text = tweet.get("text") or ""
+        if not url:
+            url = f"https://x.com/{USERNAME}/status/{tweet_id}"
 
-        created_at = tweet.get("created_at")
-
-        parsed.append(
+        tweets.append(
             {
                 "id": tweet_id,
                 "text": text,
                 "created_at": created_at,
-                "url": tweet.get(
-                    "url",
-                    f"https://x.com/{USERNAME}/status/{tweet_id}",
-                ),
+                "url": url,
             }
         )
 
-    if not parsed:
+    if not tweets:
         raise RuntimeError(
             "API odpowiedziało poprawnie, ale nie znaleziono tweetów."
         )
 
-    # ID tweetów X jest chronologiczne.
-    parsed.sort(key=lambda x: x["id"], reverse=True)
+    # Najnowszy tweet pierwszy.
+    tweets.sort(key=lambda x: x["id"], reverse=True)
 
-    newest = parsed[0]
+    newest = tweets[0]
 
-    print(f"Pobrano tweetów: {len(parsed)}")
     print("=" * 60)
     print("NAJNOWSZY POBRANY TWEET:")
     print("ID:", newest["id"])
@@ -140,38 +147,37 @@ def fetch_tweets():
     print("URL:", newest["url"])
     print("=" * 60)
 
-    # --------------------------------------------------------
-    # KRYTYCZNE ZABEZPIECZENIE PRZED STARYM FEEDem
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
+    # SPRAWDZENIE ŚWIEŻOŚCI ŹRÓDŁA
+    # ---------------------------------------------------------
 
     newest_date = parse_created_at(newest["created_at"])
 
     if newest_date is None:
         raise RuntimeError(
             "Nie udało się odczytać daty najnowszego tweeta. "
-            "Nie będę ryzykował aktualizacji pamięci."
+            "Nie aktualizuję pamięci."
         )
 
     now = datetime.now(timezone.utc)
 
     age = now - newest_date
 
-    print(
-        f"Wiek najnowszego tweeta: "
-        f"{age.total_seconds() / 3600:.2f} godzin"
-    )
+    age_hours = age.total_seconds() / 3600
+
+    print(f"Wiek najnowszego tweeta: {age_hours:.2f} godzin")
 
     if age > timedelta(hours=MAX_FEED_AGE_HOURS):
         raise RuntimeError(
             "ŹRÓDŁO JEST NIEAKTUALNE! "
-            f"Najnowszy tweet ma {age.total_seconds() / 3600:.1f} godzin. "
+            f"Najnowszy tweet ma {age_hours:.1f} godzin. "
             f"Limit: {MAX_FEED_AGE_HOURS} godzin. "
             "Pamięć NIE zostanie zmieniona."
         )
 
     print("ŚWIEŻOŚĆ FEEDU: OK")
 
-    return parsed
+    return tweets
 
 
 def find_matches(text):
@@ -195,13 +201,16 @@ def send_discord(tweet, matches):
     message = (
         "🚨 **RETROCAUSALITY ALERT** 🚨\n\n"
         f"**Dopasowanie:** {', '.join(matches)}\n\n"
-        f"**HYPERMYSTx:**\n{tweet['text']}\n\n"
+        f"**HYPERMYSTx:**\n"
+        f"{tweet['text']}\n\n"
         f"{tweet['url']}"
     )
 
     response = requests.post(
         DISCORD_WEBHOOK,
-        json={"content": message},
+        json={
+            "content": message
+        },
         timeout=30,
     )
 
@@ -225,6 +234,7 @@ def main():
         if tweet["id"] > last_id
     ]
 
+    # Od najstarszego do najnowszego.
     new_tweets.sort(key=lambda x: x["id"])
 
     print("Nowych tweetów:", len(new_tweets))
@@ -245,6 +255,7 @@ def main():
             print("Dopasowania:", ", ".join(matches))
 
             send_discord(tweet, matches)
+
         else:
             print("Brak dopasowania.")
 
