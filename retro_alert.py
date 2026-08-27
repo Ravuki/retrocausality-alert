@@ -1,14 +1,19 @@
-import json
 import os
 import re
-import subprocess
-import sys
+import html
 import requests
+from bs4 import BeautifulSoup
 
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
+# ============================================================
+# KONFIGURACJA
+# ============================================================
+
+PROFILE_URL = "https://twstalker.com/HYPERMYSTx"
+USERNAME = "HYPERMYSTx"
 MEMORY_FILE = "last_tweet.txt"
-MAX_TWEETS = 100
+
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
 KEYWORDS = {
     "retrocausality": [
@@ -16,7 +21,6 @@ KEYWORDS = {
     ],
     "voidwalker": [
         r"\bvoid\s*walker\b",
-        r"\bvoidwalker\b",
     ],
     "void shadow": [
         r"\bvoid\s*shadow\b",
@@ -25,18 +29,19 @@ KEYWORDS = {
 }
 
 
-def get_last_id():
-    try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            value = f.read().strip()
+# ============================================================
+# PAMIĘĆ
+# ============================================================
 
-        if value.isdigit():
-            return int(value)
-
-    except FileNotFoundError:
+def load_last_id():
+    if not os.path.exists(MEMORY_FILE):
         return 0
 
-    return 0
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            return int(f.read().strip())
+    except (ValueError, OSError):
+        return 0
 
 
 def save_last_id(tweet_id):
@@ -44,214 +49,238 @@ def save_last_id(tweet_id):
         f.write(str(tweet_id))
 
 
-def get_tweets():
-    command = [
-        "x",
-        "timeline",
-        "HYPERMYSTx",
-        "--guest",
-        "--no-cache",
-        "-n",
-        str(MAX_TWEETS),
-        "-o",
-        "jsonl",
-    ]
+# ============================================================
+# POBIERANIE TWEETÓW
+# ============================================================
 
-    print("Uruchamiam:", " ".join(command))
+def fetch_tweets():
+    print(f"Pobieram: {PROFILE_URL}")
 
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=60,
+    response = requests.get(
+        PROFILE_URL,
+        timeout=30,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/139.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     )
 
-    if result.returncode != 0:
-        print("STDOUT:")
-        print(result.stdout)
+    print("HTTP status:", response.status_code)
+    print("Final URL:", response.url)
 
-        print("STDERR:")
-        print(result.stderr)
+    response.raise_for_status()
 
-        raise RuntimeError(
-            f"x-cli zakończył się kodem {result.returncode}"
-        )
+    soup = BeautifulSoup(response.text, "html.parser")
 
     tweets = []
+    seen_ids = set()
 
-    for line in result.stdout.splitlines():
-        line = line.strip()
+    # Szukamy wszystkich linków prowadzących do konkretnych tweetów.
+    for link in soup.find_all("a", href=True):
+        href = html.unescape(link["href"])
 
-        if not line:
+        match = re.search(
+            rf"/{re.escape(USERNAME)}/status/(\d+)",
+            href,
+            re.IGNORECASE,
+        )
+
+        if not match:
             continue
 
-        try:
-            tweet = json.loads(line)
-        except json.JSONDecodeError:
+        tweet_id = int(match.group(1))
+
+        if tweet_id in seen_ids:
             continue
 
-        tweet_id = tweet.get("id")
+        seen_ids.add(tweet_id)
 
-        if tweet_id is None:
-            continue
+        # Próbujemy znaleźć kontener zawierający tekst danego tweeta.
+        container = link
 
-        tweet_id = str(tweet_id)
+        for _ in range(8):
+            if container.parent is None:
+                break
 
-        if not tweet_id.isdigit():
-            continue
+            container = container.parent
+            text = container.get_text(" ", strip=True)
 
-        tweets.append({
-            "id": int(tweet_id),
-            "text": tweet.get("text") or "",
-        })
+            if USERNAME in text and len(text) > 30:
+                break
+
+        full_text = container.get_text(" ", strip=True)
+
+        # Usuwamy typowe śmieci z interfejsu TwStalker.
+        full_text = re.sub(
+            r"\bView Details\b",
+            "",
+            full_text,
+            flags=re.IGNORECASE,
+        )
+
+        full_text = re.sub(
+            r"\bPrevious\b|\bNext\b|\bkeyboard_arrow_left\b|\bkeyboard_arrow_right\b",
+            "",
+            full_text,
+            flags=re.IGNORECASE,
+        )
+
+        full_text = re.sub(r"\s+", " ", full_text).strip()
+
+        # Jeżeli kontener jest zbyt ogólny, próbujemy wyciągnąć tekst
+        # z elementów zawierających bezpośrednio treść.
+        if USERNAME in full_text:
+            marker = f"{USERNAME}"
+            pos = full_text.find(marker)
+
+            if pos >= 0:
+                candidate = full_text[pos + len(marker):].strip()
+
+                # Usuń ewentualny nagłówek / liczbę followersów itp.
+                candidate = re.sub(
+                    r"^\s*\d+\s*Followers.*?\d+\s*Following\s*",
+                    "",
+                    candidate,
+                    flags=re.IGNORECASE,
+                )
+
+                if len(candidate) > 10:
+                    full_text = candidate
+
+        # Ostateczne czyszczenie.
+        full_text = html.unescape(full_text)
+
+        tweets.append(
+            {
+                "id": tweet_id,
+                "text": full_text,
+                "url": f"https://x.com/{USERNAME}/status/{tweet_id}",
+            }
+        )
 
     if not tweets:
         raise RuntimeError(
-            "x-cli nie zwrócił żadnych poprawnych tweetów."
+            "Nie znaleziono żadnych tweetów HYPERMYST na TwStalker."
         )
 
-    # Usuwamy duplikaty.
-    unique = {}
+    # Najwyższe ID traktujemy jako najnowszy znaleziony tweet.
+    tweets.sort(key=lambda x: x["id"])
 
-    for tweet in tweets:
-        unique[tweet["id"]] = tweet
+    print(f"Znalezionych tweetów: {len(tweets)}")
+    print("=" * 50)
 
-    tweets = list(unique.values())
+    newest = tweets[-1]
 
-    # Największe ID = najnowszy tweet.
-    tweets.sort(
-        key=lambda tweet: tweet["id"],
-        reverse=True,
-    )
-
-    print("Pobrano poprawnych tweetów:", len(tweets))
-
-    newest = tweets[0]
-
-    print("NAJNOWSZY POBRANY TWEET:")
+    print("NAJNOWSZY ZNALEZIONY TWEET:")
     print("ID:", newest["id"])
     print("Treść:", newest["text"])
-    print(
-        "URL:",
-        f"https://x.com/HYPERMYSTx/status/{newest['id']}",
-    )
+    print("URL:", newest["url"])
+    print("=" * 50)
 
     return tweets
 
 
+# ============================================================
+# KEYWORDY
+# ============================================================
+
 def find_matches(text):
     matches = []
 
-    for keyword, patterns in KEYWORDS.items():
+    for name, patterns in KEYWORDS.items():
         for pattern in patterns:
             if re.search(pattern, text, re.IGNORECASE):
-                matches.append(keyword)
+                matches.append(name)
                 break
 
     return matches
 
 
+# ============================================================
+# DISCORD
+# ============================================================
+
 def send_discord(tweet, matches):
     if not DISCORD_WEBHOOK:
         raise RuntimeError(
-            "Brak secreta DISCORD_WEBHOOK!"
+            "Brak DISCORD_WEBHOOK w GitHub Secrets."
         )
 
-    tweet_id = tweet["id"]
-    text = tweet["text"]
-
-    labels = " / ".join(
-        name.upper()
-        for name in matches
-    )
-
-    message = (
-        f"🚨 HYPERMYST ALERT — {labels} 🚨\n\n"
-        f"{text}\n\n"
-        f"https://x.com/HYPERMYSTx/status/{tweet_id}"
+    content = (
+        "🚨 **RETROCAUSALITY ALERT** 🚨\n\n"
+        f"**Dopasowanie:** {', '.join(matches)}\n"
+        f"**HYPERMYST:** {tweet['text']}\n\n"
+        f"{tweet['url']}"
     )
 
     response = requests.post(
         DISCORD_WEBHOOK,
-        json={"content": message},
-        timeout=20,
+        json={"content": content},
+        timeout=30,
     )
+
+    print("Discord HTTP status:", response.status_code)
 
     response.raise_for_status()
 
     print("Discord: powiadomienie wysłane.")
 
 
-def check():
-    if not DISCORD_WEBHOOK:
-        raise RuntimeError(
-            "Brak secreta DISCORD_WEBHOOK!"
-        )
+# ============================================================
+# GŁÓWNY PROGRAM
+# ============================================================
 
-    last_id = get_last_id()
+def main():
+    last_id = load_last_id()
 
     print("Ostatni zapamiętany ID:", last_id)
 
-    tweets = get_tweets()
+    tweets = fetch_tweets()
 
+    # Tylko tweety faktycznie nowsze od zapamiętanego.
     new_tweets = [
         tweet
         for tweet in tweets
         if tweet["id"] > last_id
     ]
 
-    # Od najstarszego nowego do najnowszego.
-    new_tweets.sort(
-        key=lambda tweet: tweet["id"]
-    )
-
     print("Nowych tweetów:", len(new_tweets))
 
+    # Przetwarzamy chronologicznie.
+    new_tweets.sort(key=lambda x: x["id"])
+
+    newest_id = last_id
+
     for tweet in new_tweets:
-        tweet_id = tweet["id"]
-        text = tweet["text"]
+        print("-" * 40)
+        print("Tweet ID:", tweet["id"])
+        print("Treść:", tweet["text"])
+        print("URL:", tweet["url"])
 
-        print("----------------------------------------")
-        print("Tweet ID:", tweet_id)
-        print("Treść:", text)
-
-        matches = find_matches(text)
+        matches = find_matches(tweet["text"])
 
         if matches:
             print("!!! ZNALEZIONO !!!")
-            print(
-                "Dopasowania:",
-                ", ".join(matches),
-            )
+            print("Dopasowania:", ", ".join(matches))
 
             send_discord(tweet, matches)
-
         else:
             print("Brak dopasowania.")
 
-    # Zapamiętujemy najnowszy pobrany tweet.
-    newest_id = tweets[0]["id"]
+        newest_id = max(newest_id, tweet["id"])
 
-    if newest_id > last_id:
+    # WAŻNE:
+    # Pamięć aktualizujemy dopiero po pomyślnym przetworzeniu
+    # wszystkich nowych tweetów.
+    if newest_id != last_id:
         save_last_id(newest_id)
 
-        print(
-            "Zapisano ostatni ID:",
-            newest_id,
-        )
-    else:
-        print(
-            "Zapisano ostatni ID:",
-            last_id,
-        )
+    print("Zapisano ostatni ID:", newest_id)
 
 
 if __name__ == "__main__":
-    try:
-        check()
-
-    except Exception as e:
-        print()
-        print("!!! KRYTYCZNY BŁĄD !!!")
-        print(str(e))
-        sys.exit(1)
+    main()
