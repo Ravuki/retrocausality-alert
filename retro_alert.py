@@ -5,14 +5,22 @@ import xml.etree.ElementTree as ET
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 RSS_FEED_URL = os.getenv("RSS_FEED_URL")
 
-KEYWORD = "retrocausality"
+KEYWORDS = {
+    "retrocausality": "🚨 RETROCAUSALITY ALERT 🚨",
+    "voidwalker": "🟣 VOIDWALKER ALERT 🟣",
+    "void shadow": "🟣 VOID SHADOW FRAME ALERT 🟣",
+}
+
 MEMORY_FILE = "last_tweet.txt"
+
 
 def send_discord(message):
     requests.post(
         DISCORD_WEBHOOK,
-        json={"content": message}
+        json={"content": message},
+        timeout=20
     )
+
 
 def get_last_id():
     try:
@@ -21,9 +29,11 @@ def get_last_id():
     except:
         return "0"
 
+
 def save_last_id(tweet_id):
     with open(MEMORY_FILE, "w") as f:
         f.write(tweet_id)
+
 
 def check_feed():
     last_id = get_last_id()
@@ -71,7 +81,7 @@ def check_feed():
 
     newest_id = newest_id.text
 
-    # sprawdź tylko nowe wpisy
+    # Sprawdź tylko nowe wpisy
     for item in items:
         guid = item.find("guid")
 
@@ -93,14 +103,21 @@ def check_feed():
         if description is not None:
             text += " " + (description.text or "")
 
-        if KEYWORD in text.lower():
-            send_discord(
-                "🚨 RETROCAUSALITY ALERT 🚨\n\n"
-                + text
-                + "\n\n"
-                + (link.text if link is not None else "")
-            )
+        text_lower = text.lower()
+
+        # Sprawdź wszystkie słowa kluczowe
+        for keyword, alert_name in KEYWORDS.items():
+
+            if keyword in text_lower:
+                send_discord(
+                    f"{alert_name}\n\n"
+                    + f"🔎 Wykryto: `{keyword}`\n\n"
+                    + text
+                    + "\n\n"
+                    + (link.text if link is not None else "")
+                )
 
     save_last_id(newest_id)
+
 
 check_feed()
