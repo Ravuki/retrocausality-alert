@@ -70,15 +70,16 @@ def find_keywords(text):
 
 def get_tweets():
     command = [
-        "x",
-        "timeline",
-        "HYPERMYSTx",
-        "--guest",
-        "-n",
-        "50",
-        "-o",
-        "jsonl",
-    ]
+    "x",
+    "timeline",
+    "HYPERMYSTx",
+    "--guest",
+    "--no-cache",
+    "-n",
+    "50",
+    "-o",
+    "jsonl",
+]
 
     print("Uruchamiam:", " ".join(command))
 
