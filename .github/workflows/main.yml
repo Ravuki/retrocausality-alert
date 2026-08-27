@@ -20,27 +20,42 @@ jobs:
       - name: Pobierz kod
         uses: actions/checkout@v4
 
-      - name: Ustaw Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-
-      - name: Zainstaluj x-cli
-        run: |
-          go install github.com/tamnd/x-cli/cmd/x@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Sprawdź x-cli
-        run: |
-          x version
-
       - name: Ustaw Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Instalacja bibliotek
-        run: pip install requests
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Sprawdź źródło HYPERMYST
+        run: |
+          python - <<'PY'
+          import requests
+
+          url = "https://twstalker.com/HYPERMYSTx"
+
+          response = requests.get(
+              url,
+              timeout=30,
+              headers={
+                  "User-Agent": "Mozilla/5.0"
+              }
+          )
+
+          print("HTTP status:", response.status_code)
+          print("Rozmiar odpowiedzi:", len(response.text))
+
+          response.raise_for_status()
+
+          if "HYPERMYST" not in response.text:
+              raise RuntimeError(
+                  "Źródło nie zawiera profilu HYPERMYST!"
+              )
+
+          print("TEST ŹRÓDŁA: OK")
+          PY
 
       - name: Start bota
         env:
