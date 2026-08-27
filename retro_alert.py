@@ -1,23 +1,19 @@
-import requests
+import json
 import os
-import xml.etree.ElementTree as ET
 import re
+import subprocess
+import requests
 
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-RSS_FEED_URL = os.getenv("RSS_FEED_URL")
-
 MEMORY_FILE = "last_tweet.txt"
 
 KEYWORDS = {
     "retrocausality": [
         r"\bretrocausality\b",
     ],
-
     "voidwalker": [
-        r"\bvoidwalker\b",
         r"\bvoid\s*walker\b",
     ],
-
     "void shadow": [
         r"\bvoid\s*shadow\b",
         r"\bvoidshadow\b",
@@ -30,14 +26,14 @@ def send_discord(message):
         response = requests.post(
             DISCORD_WEBHOOK,
             json={"content": message},
-            timeout=20
+            timeout=20,
         )
 
         if response.status_code not in (200, 204):
             print(
                 "Discord webhook error:",
                 response.status_code,
-                response.text
+                response.text,
             )
             return False
 
@@ -45,35 +41,25 @@ def send_discord(message):
         return True
 
     except requests.RequestException as e:
-        print("Błąd Discord webhook:", e)
+        print("Discord webhook error:", e)
         return False
 
 
 def get_last_id():
     try:
-        with open(MEMORY_FILE, "r") as f:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
             value = f.read().strip()
-
-            if value:
-                return value
-
+            return value if value else "0"
     except FileNotFoundError:
-        pass
-
-    return "0"
+        return "0"
 
 
 def save_last_id(tweet_id):
-    with open(MEMORY_FILE, "w") as f:
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         f.write(tweet_id)
 
 
 def find_keywords(text):
-    """
-    Zwraca listę wykrytych kategorii.
-    Wielkość liter nie ma znaczenia.
-    """
-
     found = []
 
     for name, patterns in KEYWORDS.items():
@@ -85,102 +71,103 @@ def find_keywords(text):
     return found
 
 
+def get_tweets():
+    command = [
+        "x",
+        "timeline",
+        "HYPERMYSTx",
+        "--guest",
+        "-n",
+        "50",
+        "-o",
+        "jsonl",
+    ]
+
+    print("Uruchamiam:", " ".join(command))
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        print("x-cli przekroczył limit czasu.")
+        return None
+
+    if result.returncode != 0:
+        print("x-cli zakończył się błędem.")
+        print("Exit code:", result.returncode)
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+        return None
+
+    if result.stderr:
+        print("x-cli info:", result.stderr)
+
+    tweets = []
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+
+        if not line:
+            continue
+
+        try:
+            tweet = json.loads(line)
+            tweets.append(tweet)
+        except json.JSONDecodeError:
+            print("Nie udało się odczytać JSON:", line)
+
+    return tweets
+
+
 def check_feed():
     last_id = get_last_id()
 
     print("Ostatni zapamiętany ID:", last_id)
 
-    try:
-        r = requests.get(
-            RSS_FEED_URL,
-            timeout=20,
-            headers={
-                "User-Agent": "Mozilla/5.0 (HyperMyst Alert Bot)"
-            }
-        )
+    tweets = get_tweets()
 
-        print("Feed URL:", RSS_FEED_URL)
-        print("HTTP status:", r.status_code)
-        print("Content-Type:", r.headers.get("Content-Type"))
-        print("Final URL:", r.url)
-        print("Response preview:", repr(r.text[:500]))
-
-        r.raise_for_status()
-
-    except requests.RequestException as e:
-        print("Błąd podczas pobierania RSS:", e)
-
-        # NIE aktualizujemy last_tweet.txt.
-        # Przy kolejnym uruchomieniu spróbujemy ponownie.
+    if tweets is None:
+        print("Nie aktualizuję pamięci — spróbujemy ponownie przy następnym uruchomieniu.")
         return
 
-    try:
-        root = ET.fromstring(r.text)
-
-    except ET.ParseError as e:
-        print("Feed nie jest poprawnym XML-em!")
-        print("Błąd XML:", e)
-        print("Odpowiedź serwera:", repr(r.text[:1000]))
-
-        # NIE aktualizujemy last_tweet.txt.
+    if not tweets:
+        print("x-cli nie zwrócił żadnych tweetów.")
         return
 
-    items = root.findall(".//item")
+    print("Pobrano tweetów:", len(tweets))
 
-    if not items:
-        print("Nie znaleziono żadnych <item> w feedzie.")
-        return
+    new_tweets = []
 
-    newest_id_element = items[0].find("guid")
+    for tweet in tweets:
+        tweet_id = str(tweet.get("id", "")).strip()
 
-    if newest_id_element is None or not newest_id_element.text:
-        print("Najnowszy wpis nie ma GUID.")
-        return
-
-    newest_id = newest_id_element.text.strip()
-
-    print("Najnowszy ID:", newest_id)
-
-    new_items = []
-
-    # Zbieramy wszystkie wpisy nowsze od ostatnio zapamiętanego.
-    for item in items:
-        guid = item.find("guid")
-
-        if guid is None or not guid.text:
+        if not tweet_id:
             continue
 
-        guid_text = guid.text.strip()
-
-        if guid_text == last_id:
+        if tweet_id == last_id:
             break
 
-        new_items.append(item)
+        new_tweets.append(tweet)
 
-    print("Nowych wpisów:", len(new_items))
+    # Najpierw najstarsze, potem najnowsze.
+    new_tweets.reverse()
 
-    # Przetwarzamy od najstarszego do najnowszego.
-    new_items.reverse()
+    print("Nowych tweetów:", len(new_tweets))
 
-    for item in new_items:
+    newest_id = str(tweets[0].get("id", "")).strip()
 
-        guid = item.find("guid")
-        title = item.find("title")
-        description = item.find("description")
-        link = item.find("link")
+    if not newest_id:
+        print("Nie znaleziono ID najnowszego tweeta.")
+        return
 
-        tweet_id = guid.text.strip() if guid is not None and guid.text else ""
-
-        title_text = title.text.strip() if title is not None and title.text else ""
-        description_text = (
-            description.text.strip()
-            if description is not None and description.text
-            else ""
-        )
-
-        link_text = link.text.strip() if link is not None and link.text else ""
-
-        text = f"{title_text} {description_text}".strip()
+    for tweet in new_tweets:
+        tweet_id = str(tweet.get("id", "")).strip()
+        text = str(tweet.get("text", "")).strip()
+        url = str(tweet.get("url", "")).strip()
 
         print("----------------------------------------")
         print("Tweet ID:", tweet_id)
@@ -189,7 +176,6 @@ def check_feed():
         found_keywords = find_keywords(text)
 
         if not found_keywords:
-            print("Brak interesujących słów.")
             continue
 
         print("WYKRYTO:", ", ".join(found_keywords))
@@ -212,12 +198,11 @@ def check_feed():
                 f"{alert_title}\n\n"
                 f"🔎 Wykryto: `{keyword}`\n\n"
                 f"{text}\n\n"
-                f"{link_text}"
+                f"{url}"
             )
 
             send_discord(message)
 
-    # Aktualizujemy pamięć dopiero po poprawnym przetworzeniu feedu.
     save_last_id(newest_id)
 
     print("Zapisano ostatni ID:", newest_id)
